@@ -1,1 +1,1 @@
-from stable_baselines.hippo.hippo import PPO2
+from stable_baselines.hippo.hippo import HIPPO
