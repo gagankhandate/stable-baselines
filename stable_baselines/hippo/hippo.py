@@ -42,6 +42,7 @@ class HIPPO(ActorCriticRLModel):
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, verbose=1,
                  tensorboard_log=None, _init_setup_model=True):
 
+        # Calls ActorCriticRLModel's __init__() - sets the self.policy and self.env ??
         super(HIPPO, self).__init__(policy=policy, env=env, verbose=verbose, requires_vec_env=True,
                                    _init_setup_model=_init_setup_model)
 
@@ -115,6 +116,8 @@ class HIPPO(ActorCriticRLModel):
                                         n_batch_step, reuse=False)
                 with tf.variable_scope("train_model", reuse=True,
                                        custom_getter=tf_util.outer_scope_getter("train_model")):
+                    # Uses self.observation_space for setting size of input,
+                    # self.action_space for setting size of output
                     train_model = self.policy(self.sess, self.observation_space, self.action_space,
                                               self.n_envs // self.nminibatches, self.n_steps, n_batch_train,
                                               reuse=True)
@@ -128,6 +131,7 @@ class HIPPO(ActorCriticRLModel):
                     self.learning_rate_ph = tf.placeholder(tf.float32, [], name="learning_rate_ph")
                     self.clip_range_ph = tf.placeholder(tf.float32, [], name="clip_range_ph")
 
+                    # Loss Computation Graph
                     neglogpac = train_model.proba_distribution.neglogp(self.action_ph)
                     self.entropy = tf.reduce_mean(train_model.proba_distribution.entropy())
 
@@ -153,6 +157,7 @@ class HIPPO(ActorCriticRLModel):
                     tf.summary.scalar('clip_factor', self.clipfrac)
                     tf.summary.scalar('loss', loss)
 
+                    # Just calculates gradients (doesn't apply them) w.r.t trainable gradients for a given input.
                     with tf.variable_scope('model'):
                         self.params = tf.trainable_variables()
                     grads = tf.gradients(loss, self.params)
@@ -177,10 +182,12 @@ class HIPPO(ActorCriticRLModel):
                     tf.summary.histogram('old_neglog_action_probabilty', self.old_neglog_pac_ph)
                     tf.summary.scalar('old_value_pred', tf.reduce_mean(self.old_vpred_ph))
                     tf.summary.histogram('old_value_pred', self.old_vpred_ph)
-                    if len(self.observation_space.shape) == 3:
-                        tf.summary.image('observation', train_model.obs_ph)
-                    else:
-                        tf.summary.histogram('observation', train_model.obs_ph)
+
+                    # if len(self.observation_space.shape) == 3:
+                    #     tf.summary.image('observation', train_model.obs_ph)
+                    # else:
+                    #     tf.summary.histogram('observation', train_model.obs_ph)
+                    tf.summary.histogram('observation', train_model.obs_ph)
 
                 self.train_model = train_model
                 self.act_model = act_model
@@ -264,10 +271,12 @@ class HIPPO(ActorCriticRLModel):
                 assert self.n_batch % self.nminibatches == 0
                 batch_size = self.n_batch // self.nminibatches
                 t_start = time.time()
+                # frac decreases after every update, used for calculating current learning rate and clipping
                 frac = 1.0 - (update - 1.0) / nupdates
                 lr_now = self.learning_rate(frac)
                 cliprangenow = self.cliprange(frac)
                 # true_reward is the reward without discount
+                # runner is used for interacting with the env for self.n_steps and returns the following:
                 obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = runner.run()
                 ep_info_buf.extend(ep_infos)
                 mb_loss_vals = []

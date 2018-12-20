@@ -123,7 +123,7 @@ def robotics_arg_parser():
     :return: (ArgumentParser) parser {'--env': 'FetchReach-v0', '--seed': 0, '--num-timesteps': int(1e6)}
     """
     parser = arg_parser()
-    parser.add_argument('--env', help='environment ID', type=str, default='FetchReach-v0')
+    parser.add_argument('--env', help='environment ID', type=str, default='FetchReach-v1')
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--num-timesteps', type=int, default=int(1e6))
     return parser
