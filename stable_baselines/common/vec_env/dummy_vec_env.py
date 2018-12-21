@@ -4,7 +4,7 @@ import numpy as np
 from gym import spaces
 
 from . import VecEnv
-
+from copy import deepcopy
 
 class DummyVecEnv(VecEnv):
     """
@@ -48,14 +48,14 @@ class DummyVecEnv(VecEnv):
             if self.buf_dones[env_idx]:
                 obs = self.envs[env_idx].reset()
             self._save_obs(env_idx, obs)
-        return (np.copy(self._obs_from_buf()), np.copy(self.buf_rews), np.copy(self.buf_dones),
+        return (deepcopy(self._obs_from_buf()), deepcopy(self.buf_rews), deepcopy(self.buf_dones),
                 self.buf_infos.copy())
 
     def reset(self):
         for env_idx in range(self.num_envs):
             obs = self.envs[env_idx].reset()
             self._save_obs(env_idx, obs)
-        return np.copy(self._obs_from_buf())
+        return deepcopy(self._obs_from_buf())
 
     def close(self):
         return
