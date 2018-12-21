@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from stable_baselines import logger
 from stable_baselines.common import explained_variance, ActorCriticRLModel, tf_util, SetVerbosity, TensorboardWriter
-from stable_baselines.common.runners import AbstractEnvRunner
+from stable_baselines.common.runners import AbstractGoalEnvRunner
 from stable_baselines.common.policies import LstmPolicy, ActorCriticPolicy
 from stable_baselines.a2c.utils import total_episode_reward_logger
 
@@ -367,7 +367,7 @@ class HIPPO(ActorCriticRLModel):
         self._save_to_file(save_path, data=data, params=params)
 
 
-class Runner(AbstractEnvRunner):
+class Runner(AbstractGoalEnvRunner):
     def __init__(self, *, env, model, n_steps, gamma, lam):
         """
         A runner to learn the policy of an environment for a model
@@ -397,11 +397,13 @@ class Runner(AbstractEnvRunner):
             - infos: (dict) the extra information of the model
         """
         # mb stands for minibatch
-        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [], [], [], [], [], []
+        mb_ob_dicts, mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [], [], [], [], [], [], []
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
+            self.obs = obs_dict_asarray(self.obs_dict)
             actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
+            mb_ob_dicts.append(self.obs_dict.copy())
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)
@@ -411,7 +413,7 @@ class Runner(AbstractEnvRunner):
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
                 clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            self.obs[:], rewards, self.dones, infos = self.env.step(clipped_actions)
+            self.obs_dict, rewards, self.dones, infos = self.env.step(clipped_actions)
             for info in infos:
                 maybe_ep_info = info.get('episode')
                 if maybe_ep_info is not None:
@@ -499,3 +501,17 @@ def safe_mean(arr):
     :return: (float)
     """
     return np.nan if len(arr) == 0 else np.mean(arr)
+
+
+def obs_dict_asarray(ob_dict, keys = None):
+    """
+    :param ob_dict: (np.ndarray) observation dict
+    :param keys: (list) keys in the dictionary to be stacked together
+
+    :return: (np.ndarray)
+
+    """
+    if keys is None:
+        keys = ['observation', 'desired_goal']
+
+    return np.hstack([ob_dict[key] for key in keys if key in ob_dict.keys()])
