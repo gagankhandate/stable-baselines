@@ -106,7 +106,7 @@ class BasePolicy(ABC):
     """
 
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm=256, reuse=False, scale=False,
-                 obs_phs=None, add_action_ph=False):
+                 obs_phs=None, add_action_ph=True):
         self.n_env = n_env
         self.n_steps = n_steps
         with tf.variable_scope("input", reuse=False):
@@ -186,6 +186,7 @@ class ActorCriticPolicy(BasePolicy):
             if self.is_discrete:
                 self.policy_proba = tf.nn.softmax(self.policy_proba)
             self._value = self.value_fn[:, 0]
+            self._neglogpac = self.proba_distribution.neglogp(self.action_ph)
 
     def step(self, obs, state=None, mask=None, deterministic=False):
         """
@@ -353,6 +354,10 @@ class FeedForwardPolicy(ActorCriticPolicy):
 
     def value(self, obs, state=None, mask=None):
         return self.sess.run(self._value, {self.obs_ph: obs})
+
+    def neglogpac(self, act, obs):
+        return self.sess.run(self._neglogpac, {self.action_ph: act, self.obs_ph: obs})
+
 
 
 class CnnPolicy(FeedForwardPolicy):

@@ -113,7 +113,8 @@ class HIPPO(ActorCriticRLModel):
                     n_batch_train = self.n_batch // self.nminibatches
 
                 act_model = self.policy(self.sess, self.observation_space, self.action_space, self.n_envs, 1,
-                                        n_batch_step, reuse=False)
+                                        n_batch_step, reuse=False, add_action_ph=True)
+
                 with tf.variable_scope("train_model", reuse=True,
                                        custom_getter=tf_util.outer_scope_getter("train_model")):
                     # Uses self.observation_space for setting size of input,
@@ -268,24 +269,32 @@ class HIPPO(ActorCriticRLModel):
 
             nupdates = total_timesteps // self.n_batch
             for update in range(1, nupdates + 1):
-                assert self.n_batch % self.nminibatches == 0
-                batch_size = self.n_batch // self.nminibatches
+
                 t_start = time.time()
                 # frac decreases after every update, used for calculating current learning rate and clipping
                 frac = 1.0 - (update - 1.0) / nupdates
-                lr_now = self.learning_rate(frac)
-                cliprangenow = self.cliprange(frac)
+                # lr_now = self.learning_rate(frac)
+                # cliprangenow = self.cliprange(frac)
+                # hack
+                lr_now = self.learning_rate(None) * frac
+                cliprangenow = self.cliprange(None) * frac
+
                 # true_reward is the reward without discount
                 # runner is used for interacting with the env for self.n_steps and returns the following:
-                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = runner.run()
+                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, true_masks, \
+                    true_values = runner.run()
+                n_batch = obs.shape[0]
+                assert n_batch % self.nminibatches == 0
+                batch_size = n_batch // self.nminibatches
+
                 ep_info_buf.extend(ep_infos)
                 mb_loss_vals = []
                 if states is None:  # nonrecurrent version
-                    inds = np.arange(self.n_batch)
+                    inds = np.arange(n_batch)
                     for epoch_num in range(self.noptepochs):
                         np.random.shuffle(inds)
-                        for start in range(0, self.n_batch, batch_size):
-                            timestep = ((update * self.noptepochs * self.n_batch + epoch_num * self.n_batch + start) //
+                        for start in range(0, n_batch, batch_size):
+                            timestep = ((update * self.noptepochs * n_batch + epoch_num * n_batch + start) //
                                         batch_size)
                             end = start + batch_size
                             mbinds = inds[start:end]
@@ -293,6 +302,7 @@ class HIPPO(ActorCriticRLModel):
                             mb_loss_vals.append(self._train_step(lr_now, cliprangenow, *slices, writer=writer,
                                                                  update=timestep))
                 else:  # recurrent version
+                    raise NotImplementedError
                     assert self.n_envs % self.nminibatches == 0
                     env_indices = np.arange(self.n_envs)
                     flat_indices = np.arange(self.n_envs * self.n_steps).reshape(self.n_envs, self.n_steps)
@@ -317,7 +327,7 @@ class HIPPO(ActorCriticRLModel):
                 if writer is not None:
                     self.episode_reward = total_episode_reward_logger(self.episode_reward,
                                                                       true_reward.reshape((self.n_envs, self.n_steps)),
-                                                                      masks.reshape((self.n_envs, self.n_steps)),
+                                                                      true_masks.reshape((self.n_envs, self.n_steps)),
                                                                       writer, update * (self.n_batch + 1))
 
                 if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
@@ -419,6 +429,31 @@ class Runner(AbstractGoalEnvRunner):
                 if maybe_ep_info is not None:
                     ep_infos.append(maybe_ep_info)
             mb_rewards.append(rewards)
+        true_reward = np.copy(np.asarray(mb_rewards, dtype=np.float32))
+        true_masks = np.asarray(mb_dones, dtype=np.bool)
+        true_values = np.asarray(mb_values, dtype=np.float32)
+
+        # hindsight
+        hindsight_goal = self.obs_dict['achieved_goal']
+        def compute_reward(achieved_goal, desired_goal):
+            # compute_reward is already vectorized in GoalEnv
+            return self.env.envs[0].compute_reward(achieved_goal, desired_goal, info=None)
+
+        for step in range(self.n_steps):
+            obs = np.hstack([mb_ob_dicts[step]['observation'], hindsight_goal])
+            # compute values and negloogpacs for the actions taken
+            #_, values, self.states, neglogpacs = self.model.step(obs, self.states, mb_dones[step])
+            # doing above samples a new action and returns the probability for that action -> incorrect
+            values = self.model.act_model.value(obs)
+            neglogpacs = self.model.act_model.neglogpac(mb_actions[step], obs)
+            mb_obs[step] = np.vstack([mb_obs[step], obs])
+            mb_actions[step] = np.vstack([mb_actions[step], mb_actions[step]])
+            mb_values[step] = np.hstack([mb_values[step], values])
+            mb_neglogpacs[step] = np.hstack([mb_neglogpacs[step], neglogpacs])
+            mb_dones[step] = np.hstack([mb_dones[step], mb_dones[step]])
+            rewards = compute_reward(mb_ob_dicts[step]['achieved_goal'], hindsight_goal)
+            mb_rewards[step] = np.hstack([mb_rewards[step], rewards])
+
         # batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
@@ -426,14 +461,14 @@ class Runner(AbstractGoalEnvRunner):
         mb_values = np.asarray(mb_values, dtype=np.float32)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        last_values = self.model.value(self.obs, self.states, self.dones)
+        last_values = self.model.value(mb_obs[-1], self.states, self.dones)
         # discount/bootstrap off value fn
         mb_advs = np.zeros_like(mb_rewards)
-        true_reward = np.copy(mb_rewards)
+        # true_reward = np.copy(mb_rewards)
         last_gae_lam = 0
         for step in reversed(range(self.n_steps)):
             if step == self.n_steps - 1:
-                nextnonterminal = 1.0 - self.dones
+                nextnonterminal = 1.0 - np.hstack([self.dones, self.dones])
                 nextvalues = last_values
             else:
                 nextnonterminal = 1.0 - mb_dones[step + 1]
@@ -442,10 +477,12 @@ class Runner(AbstractGoalEnvRunner):
             mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
         mb_returns = mb_advs + mb_values
 
-        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward = \
-            map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward))
+        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, true_masks, true_values = \
+            map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward,
+                                   true_masks, true_values))
 
-        return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward
+        return (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward,
+                true_masks, true_values)
 
 
 def get_schedule_fn(value_schedule):
