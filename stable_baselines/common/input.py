@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from gym.spaces import Discrete, Box, MultiBinary, MultiDiscrete
+from gym.spaces import Discrete, Box, MultiBinary, MultiDiscrete, Dict
 
 
 def observation_input(ob_space, batch_size=None, name='Ob', scale=False):
@@ -46,6 +46,23 @@ def observation_input(ob_space, batch_size=None, name='Ob', scale=False):
         ], axis=-1)
         return observation_ph, processed_observations
 
+    #HIPPO
+    elif isinstance(ob_space, Dict):
+        # print(ob_space)
+        # observation_ph = tf.placeholder(shape=(batch_size,) + ob_space.shape, dtype=ob_space.dtype, name=name)
+
+
+        observation_ph = tf.placeholder(shape=(batch_size, 13), dtype='float32', name=name)
+        processed_observations = tf.to_float(observation_ph)
+        if scale:
+            raise NotImplementedError
+        # rescale to [1, 0] if the bounds are defined
+        # if (scale and
+        #         not np.any(np.isinf(ob_space.low)) and not np.any(np.isinf(ob_space.high)) and
+        #         np.any((ob_space.high - ob_space.low) != 0)):
+        #     # equivalent to processed_observations / 255.0 when bounds are set to [255, 0]
+        #     processed_observations = ((processed_observations - ob_space.low) / (ob_space.high - ob_space.low))
+        return observation_ph, processed_observations
     else:
         raise NotImplementedError("Error: the model does not support input space of type {}".format(
             type(ob_space).__name__))
