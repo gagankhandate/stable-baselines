@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
-from gym.spaces import Discrete, Box, MultiBinary, MultiDiscrete
+from gym.spaces import Discrete, Box, MultiBinary, MultiDiscrete, Dict
+import warnings
 
 
 def observation_input(ob_space, batch_size=None, name='Ob', scale=False):
@@ -44,6 +45,14 @@ def observation_input(ob_space, batch_size=None, name='Ob', scale=False):
             tf.to_float(tf.one_hot(input_split, ob_space.nvec[i])) for i, input_split
             in enumerate(tf.split(observation_ph, len(ob_space.nvec), axis=-1))
         ], axis=-1)
+        return observation_ph, processed_observations
+
+    elif isinstance(ob_space, Dict):
+        
+        observation_ph = tf.placeholder(shape=(batch_size,) + ob_space.shape, dtype=ob_space.dtype, name=name)
+        processed_observations = tf.to_float(observation_ph)
+        if scale:
+            warnings.warn("Scale not supported.")
         return observation_ph, processed_observations
 
     else:
