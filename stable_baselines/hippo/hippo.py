@@ -113,7 +113,7 @@ class HIPPO(ActorCriticRLModel):
                     n_batch_train = self.n_batch // self.nminibatches
 
                 act_model = self.policy(self.sess, self.observation_space, self.action_space, self.n_envs, 1,
-                                        n_batch_step, reuse=False, add_action_ph=True)
+                                        n_batch_step, reuse=False)
 
                 with tf.variable_scope("train_model", reuse=True,
                                        custom_getter=tf_util.outer_scope_getter("train_model")):
@@ -273,12 +273,11 @@ class HIPPO(ActorCriticRLModel):
                 t_start = time.time()
                 # frac decreases after every update, used for calculating current learning rate and clipping
                 frac = 1.0 - (update - 1.0) / nupdates
-                # lr_now = self.learning_rate(frac)
-                # cliprangenow = self.cliprange(frac)
+                lr_now = self.learning_rate(frac)
+                cliprangenow = self.cliprange(frac)
                 # hack
-                lr_now = self.learning_rate(None) * frac
-                cliprangenow = self.cliprange(None) * frac
-
+                # lr_now = self.learning_rate(None) * frac
+                # cliprangenow = self.cliprange(None) * frac
                 # true_reward is the reward without discount
                 # runner is used for interacting with the env for self.n_steps and returns the following:
                 obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, true_masks, \
