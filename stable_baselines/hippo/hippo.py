@@ -438,8 +438,19 @@ class Runner(AbstractGoalEnvRunner):
             # compute_reward is already vectorized in GoalEnv
             return self.env.envs[0].compute_reward(achieved_goal, desired_goal, info=None)
 
+
+        hindsight_goal = []
+        curr_goal = mb_ob_dicts[-1]['achieved_goal'].copy()
+        for step in reversed(range(self.n_steps)):
+            dones = mb_dones[step].copy()
+            for i, done in enumerate(dones):
+                if done:
+                    curr_goal[i] = mb_ob_dicts[step-1]['achieved_goal'][i].copy()
+            hindsight_goal.append(curr_goal.copy())
+        hindsight_goal = np.flip(np.array(hindsight_goal), axis=0)
+
         for step in range(self.n_steps):
-            obs = np.hstack([mb_ob_dicts[step]['observation'], hindsight_goal])
+            obs = np.hstack([mb_ob_dicts[step]['observation'], hindsight_goal[step]])
             # compute values and negloogpacs for the actions taken
             #_, values, self.states, neglogpacs = self.model.step(obs, self.states, mb_dones[step])
             # doing above samples a new action and returns the probability for that action -> incorrect
@@ -450,7 +461,7 @@ class Runner(AbstractGoalEnvRunner):
             mb_values[step] = np.hstack([mb_values[step], values])
             mb_neglogpacs[step] = np.hstack([mb_neglogpacs[step], neglogpacs])
             mb_dones[step] = np.hstack([mb_dones[step], mb_dones[step]])
-            rewards = compute_reward(mb_ob_dicts[step]['achieved_goal'], hindsight_goal)
+            rewards = compute_reward(mb_ob_dicts[step]['achieved_goal'], hindsight_goal[step])
             mb_rewards[step] = np.hstack([mb_rewards[step], rewards])
 
         # batch of steps to batch of rollouts
