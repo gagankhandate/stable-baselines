@@ -287,6 +287,10 @@ class LstmPolicy(ActorCriticPolicy):
     def value(self, obs, state=None, mask=None):
         return self.sess.run(self._value, {self.obs_ph: obs, self.states_ph: state, self.masks_ph: mask})
 
+    def neglogpac(self, act, obs, state=None, mask=None):
+        return self.sess.run(self._neglogpac, {self.action_ph: act, self.obs_ph: obs, self.states_ph: state,
+                                               self.masks_ph: mask})
+
 
 class FeedForwardPolicy(ActorCriticPolicy):
     """
@@ -355,7 +359,7 @@ class FeedForwardPolicy(ActorCriticPolicy):
     def value(self, obs, state=None, mask=None):
         return self.sess.run(self._value, {self.obs_ph: obs})
 
-    def neglogpac(self, act, obs):
+    def neglogpac(self, act, obs, state = None, mask=None):
         return self.sess.run(self._neglogpac, {self.action_ph: act, self.obs_ph: obs})
 
 

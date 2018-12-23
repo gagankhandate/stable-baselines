@@ -44,6 +44,7 @@ class AbstractGoalEnvRunner(ABC):
         self.batch_ob_shape = (n_env * n_steps,) + env.observation_space.shape
         self.obs_dict = env.reset()
         self.n_steps = n_steps
+        self.initial_states = model.initial_state.copy()
         self.states = model.initial_state
         self.dones = [False for _ in range(n_env)]
 

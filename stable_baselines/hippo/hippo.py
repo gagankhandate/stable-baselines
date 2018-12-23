@@ -448,14 +448,13 @@ class Runner(AbstractGoalEnvRunner):
                     curr_goal[i] = mb_ob_dicts[step-1]['achieved_goal'][i].copy()
             hindsight_goal.append(curr_goal.copy())
         hindsight_goal = np.flip(np.array(hindsight_goal), axis=0)
-
+        self.states = self.initial_states
         for step in range(self.n_steps):
             obs = np.hstack([mb_ob_dicts[step]['observation'], hindsight_goal[step]])
             # compute values and negloogpacs for the actions taken
-            #_, values, self.states, neglogpacs = self.model.step(obs, self.states, mb_dones[step])
-            # doing above samples a new action and returns the probability for that action -> incorrect
-            values = self.model.act_model.value(obs)
-            neglogpacs = self.model.act_model.neglogpac(mb_actions[step], obs)
+            neglogpacs = self.model.act_model.neglogpac(mb_actions[step], obs, self.states, mb_dones[step])
+            _, values, self.states, _ = self.model.step(obs, self.states, mb_dones[step])
+            # values = self.model.act_model.value(obs)
             mb_obs[step] = np.vstack([mb_obs[step], obs])
             mb_actions[step] = np.vstack([mb_actions[step], mb_actions[step]])
             mb_values[step] = np.hstack([mb_values[step], values])
