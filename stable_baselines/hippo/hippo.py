@@ -39,7 +39,7 @@ class HIPPO(ActorCriticRLModel):
     """
 
     def __init__(self, policy, env, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4, vf_coef=0.5,
-                 max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, verbose=1,
+                 max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, neglogpac_clip = 10, verbose=1,
                  tensorboard_log=None, _init_setup_model=True):
 
         # Calls ActorCriticRLModel's __init__() - sets the self.policy and self.env ??
@@ -48,6 +48,7 @@ class HIPPO(ActorCriticRLModel):
 
         self.learning_rate = learning_rate
         self.cliprange = cliprange
+        self.neglogpac_clip = neglogpac_clip
         self.n_steps = n_steps
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
@@ -67,6 +68,7 @@ class HIPPO(ActorCriticRLModel):
         self.old_vpred_ph = None
         self.learning_rate_ph = None
         self.clip_range_ph = None
+        self.neglogpac_clip_ph = None
         self.entropy = None
         self.vf_loss = None
         self.pg_loss = None
@@ -131,9 +133,10 @@ class HIPPO(ActorCriticRLModel):
                     self.old_vpred_ph = tf.placeholder(tf.float32, [None], name="old_vpred_ph")
                     self.learning_rate_ph = tf.placeholder(tf.float32, [], name="learning_rate_ph")
                     self.clip_range_ph = tf.placeholder(tf.float32, [], name="clip_range_ph")
+                    self.neglogpac_clip_ph = tf.placeholder(tf.float32, [], name="neglogpac_clip_ph")
 
                     # Loss Computation Graph
-                    neglogpac = train_model.proba_distribution.neglogp(self.action_ph)
+                    neglogpac = tf.clip_by_value(train_model.proba_distribution.neglogp(self.action_ph), -1*self.neglogpac_clip_ph, self.neglogpac_clip_ph)
                     self.entropy = tf.reduce_mean(train_model.proba_distribution.entropy())
 
                     vpred = train_model._value
@@ -200,7 +203,7 @@ class HIPPO(ActorCriticRLModel):
 
                 self.summary = tf.summary.merge_all()
 
-    def _train_step(self, learning_rate, cliprange, obs, returns, masks, actions, values, neglogpacs, update,
+    def _train_step(self, learning_rate, cliprange, neglogpac_clip, obs, returns, masks, actions, values, neglogpacs, update,
                     writer, states=None):
         """
         Training of PPO2 Algorithm
@@ -223,7 +226,8 @@ class HIPPO(ActorCriticRLModel):
         advs = (advs - advs.mean()) / (advs.std() + 1e-8)
         td_map = {self.train_model.obs_ph: obs, self.action_ph: actions, self.advs_ph: advs, self.rewards_ph: returns,
                   self.learning_rate_ph: learning_rate, self.clip_range_ph: cliprange,
-                  self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values}
+                  self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values,
+                  self.neglogpac_clip_ph: neglogpac_clip}
         if states is not None:
             td_map[self.train_model.states_ph] = states
             td_map[self.train_model.masks_ph] = masks
@@ -275,6 +279,7 @@ class HIPPO(ActorCriticRLModel):
                 frac = 1.0 - (update - 1.0) / nupdates
                 lr_now = self.learning_rate(frac)
                 cliprangenow = self.cliprange(frac)
+                neglogpac_clip = self.neglogpac_clip
                 # hack
                 # lr_now = self.learning_rate(None) * frac
                 # cliprangenow = self.cliprange(None) * frac
@@ -298,7 +303,7 @@ class HIPPO(ActorCriticRLModel):
                             end = start + batch_size
                             mbinds = inds[start:end]
                             slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                            mb_loss_vals.append(self._train_step(lr_now, cliprangenow, *slices, writer=writer,
+                            mb_loss_vals.append(self._train_step(lr_now, cliprangenow, neglogpac_clip, *slices, writer=writer,
                                                                  update=timestep))
                 else:  # recurrent version
                     raise NotImplementedError
@@ -316,7 +321,7 @@ class HIPPO(ActorCriticRLModel):
                             mb_flat_inds = flat_indices[mb_env_inds].ravel()
                             slices = (arr[mb_flat_inds] for arr in (obs, returns, masks, actions, values, neglogpacs))
                             mb_states = states[mb_env_inds]
-                            mb_loss_vals.append(self._train_step(lr_now, cliprangenow, *slices, update=timestep,
+                            mb_loss_vals.append(self._train_step(lr_now, cliprangenow, neglogpac_clip, *slices, update=timestep,
                                                                  writer=writer, states=mb_states))
 
                 loss_vals = np.mean(mb_loss_vals, axis=0)
@@ -363,6 +368,7 @@ class HIPPO(ActorCriticRLModel):
             "nminibatches": self.nminibatches,
             "noptepochs": self.noptepochs,
             "cliprange": self.cliprange,
+            "neglogpac_clip": self.neglogpac_clip,
             "verbose": self.verbose,
             "policy": self.policy,
             "observation_space": self.observation_space,
@@ -456,6 +462,7 @@ class Runner(AbstractGoalEnvRunner):
             # doing above samples a new action and returns the probability for that action -> incorrect
             values = self.model.act_model.value(obs)
             neglogpacs = self.model.act_model.neglogpac(mb_actions[step], obs)
+            neglogpacs = np.clip(neglogpacs, a_max=10, a_min=None)
             mb_obs[step] = np.vstack([mb_obs[step], obs])
             mb_actions[step] = np.vstack([mb_actions[step], mb_actions[step]])
             mb_values[step] = np.hstack([mb_values[step], values])
